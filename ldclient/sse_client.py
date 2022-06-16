@@ -1,14 +1,16 @@
-"""
-Server-Sent Events implementation for streaming.
-
-Based on: https://bitbucket.org/btubbs/sseclient/src/a47a380a3d7182a205c0f1d5eb470013ce796b4d/sseclient.py?at=default&fileviewer=file-view-default
-"""
-# currently excluded from documentation - see docs/README.md
-
+#
+# This deprecated implementation was based on:
+# https://bitbucket.org/btubbs/sseclient/src/a47a380a3d7182a205c0f1d5eb470013ce796b4d/sseclient.py?at=default&fileviewer=file-view-default
+#
+# It has the following known issues:
+# - It does not properly handle line terminators other than \n.
+# - It does not properly handle multi-line data that starts with a blank line.
+# - It fails if a multi-byte character is split across chunks of the stream.
+#
+# It is replaced by the ldclient.impl.sse module.
+#
 import re
 import time
-
-import six
 
 import urllib3
 
@@ -22,7 +24,11 @@ from ldclient.util import throw_if_unsuccessful_response
 end_of_field = re.compile(r'\r\n\r\n|\r\r|\n\n')
 
 
-class SSEClient(object):
+class SSEClient:
+    """
+    This class is deprecated and no longer used in the SDK. It is retained here for backward compatibility in case
+    any external code was referencing it, but it will be removed in a future major version.
+    """
     def __init__(self, url, last_id=None, retry=3000, connect_timeout=10, read_timeout=300, chunk_size=10000,
                  verify_ssl=False, http=None, http_proxy=None, http_factory=None, **kwargs):
         self.url = url
@@ -37,7 +43,7 @@ class SSEClient(object):
             # for backward compatibility in case anyone else is using this class
             self._timeout = urllib3.Timeout(connect=connect_timeout, read=read_timeout)
             base_headers = {}
-        
+
         # Optional support for passing in an HTTP client
         if http:
             self.http = http
@@ -59,7 +65,7 @@ class SSEClient(object):
         # The SSE spec requires making requests with Cache-Control: nocache
         if 'headers' not in self.requests_kwargs:
             self.requests_kwargs['headers'] = {}
-        
+
         self.requests_kwargs['headers'].update(base_headers)
 
         self.requests_kwargs['headers']['Cache-Control'] = 'no-cache'
@@ -141,15 +147,8 @@ class SSEClient(object):
 
         return msg
 
-    # The following two lines make our iterator class compatible with both Python 2.x and 3.x,
-    # even though they expect different magic method names. We could accomplish the same thing
-    # by importing builtins.object and deriving from that, but this way it's easier to see
-    # what we're doing.
-    if six.PY2:
-        next = __next__
 
-
-class Event(object):
+class Event:
 
     sse_line_pattern = re.compile('(?P<name>[^:]*):?( ?(?P<value>.*))?')
 

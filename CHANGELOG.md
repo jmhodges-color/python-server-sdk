@@ -2,6 +2,91 @@
 
 All notable changes to the LaunchDarkly Python SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [7.4.2] - 2022-06-16
+### Changed:
+- Removed upper version restriction on expiringdict. This was originally necessary to allow compatibility with older Python versions which are no longer supported.
+
+## [7.4.1] - 2022-04-22
+### Added:
+- Added py.typed file to indicate typing support. Thanks [@phillipuniverse](https://github.com/launchdarkly/python-server-sdk/pull/166)
+
+### Fixed:
+- Fixed invalid operator in key in TestData.
+- Fixed bucketing logic to not treat boolean values as bucketable value types.
+
+## [7.4.0] - 2022-02-16
+### Added:
+- `TestData`, in the new module `ldclient.integrations.test_data`, is a new way to inject feature flag data programmatically into the SDK for testing—either with fixed values for each flag, or with targets and/or rules that can return different values for different users. Unlike the file data source, this mechanism does not use any external resources, only the data that your test code has provided.
+
+## [7.3.1] - 2022-02-14
+### Added:
+- CI builds now include a cross-platform test suite implemented in https://github.com/launchdarkly/sdk-test-harness. This covers many test cases that are also implemented in unit tests, but may be extended in the future to ensure consistent behavior across SDKs in other areas.
+
+### Fixed:
+- The SDK no longer uses the deprecated method `threading.Condition.notifyAll()`. (Thanks, [jdmoldenhauer](https://github.com/launchdarkly/python-server-sdk/pull/162)!)
+- A rule clause that uses a date operator should be considered a non-match, rather than an error, if either value is `None`.
+- A rule clause that uses a semver operator should be considered a non-match, rather than an error, if either value is not a string.
+- Rules targeting the `secondary` attribute will now reference the correct value.
+- The `identify` method should not emit an event if the user key is an empty string.
+- Do not include `prereqOf` field in event data if it is null. This is done to save on event transfer bandwidth.
+- Data from `all_flags_state` was always including the flag's version even when it was unnecessary.
+- Any base URIs set in `Config` will work consistently whether they have trailing slashes or not.
+- When using `all_flags_state` to produce bootstrap data for the JavaScript SDK, the Python SDK was not returning the correct metadata for evaluations that involved an experiment. As a result, the analytics events produced by the JavaScript SDK did not correctly reflect experimentation results.
+- Data from `all_flags_state` was always including the flag's version even when it was unnecessary.
+
+## [7.3.0] - 2021-12-10
+### Added:
+- The SDK now supports evaluation of Big Segments. See: https://docs.launchdarkly.com/home/users/big-segments
+
+## [7.2.1] - 2021-12-03
+### Changed:
+- Added CI testing for Python 3.10.
+
+### Fixed:
+- In streaming mode, the SDK could sometimes fail to receive flag data from LaunchDarkly if the data contained characters that are not in the Basic Latin character set. The error was intermittent and would depend on unpredictable factors of speed and network behavior which could cause the first byte of a multi-byte UTF8 character to be processed before the rest of the bytes had arrived.
+- Fixed some irregularities in the SSE parsing logic used for stream data. The SDK's CI tests now include a more thorough test suite for SSE behavior that is implemented in https://github.com/launchdarkly/sse-contract-tests, to ensure that it is consistent with other LaunchDarkly SDKs.
+
+## [7.2.0] - 2021-06-17
+### Added:
+- The SDK now supports the ability to control the proportion of traffic allocation to an experiment. This works in conjunction with a new platform feature now available to early access customers.
+
+## [7.1.0] - 2021-03-11
+### Added:
+- Added the `alias` method to `LDClient`. This can be used to associate two user objects for analytics purposes with an alias event.
+
+
+## [7.0.2] - 2021-02-18
+### Fixed:
+- The SDK could fail to send debug events when event debugging was enabled on the LaunchDarkly dashboard, if the application server&#39;s time zone was not GMT.
+
+## [7.0.1] - 2020-11-25
+### Fixed:
+- The logic for detecting uWSGI did not account for undocumented behavior in some environments where the `uwsgi` module is present in an incomplete state; this could cause an error on startup in such environments. Also, the log message about threading options related to uWSGI contained a broken link. (Thanks, [andrefreitas](https://github.com/launchdarkly/python-server-sdk/pull/148)!)
+
+## [7.0.0] - 2020-10-28
+This major release is for Python compatibility updates and removal of deprecated APIs. It introduces no new functionality except type hints.
+
+### Added:
+- Added [type hints](https://docs.python.org/3/library/typing.html) to all SDK methods. Python by itself does not enforce these, but commonly used development tools can provide static checking to trigger warnings or errors if the wrong type is used.
+
+### Changed:
+- Python 2.7, 3.3, and 3.4 are no longer supported. The minimum Python version is now 3.5.
+- The first parameter to the `Config` constructor, `sdk_key`, is now required. Previously it was possible to omit the `sdk_key` from the `Config` and specify it separately when initializing the SDK. Now, it is always in the `Config`.
+
+### Removed:
+- Removed `ldclient.set_sdk_key()`. The correct way to do this now, if you are using the singleton client method `ldclient.get()`, is to call `ldclient.set_config()` with a `Config` object that contains the SDK key.
+- Removed the optional SDK key parameter from the [`LDClient`](https://launchdarkly-python-sdk.readthedocs.io/en/latest/api-main.html#ldclient.client.LDClient) constructor. You must now provide a configuration parameter of type [`Config`](https://launchdarkly-python-sdk.readthedocs.io/en/latest/api-main.html#ldclient.config.Config), and set the SDK key within the `Config` constructor: `LDClient(Config(sdk_key = "my-sdk-key", [any other config options]))`. Previously, it was possible to specify the SDK key as a single string parameter and omit the `Config` object—`LDClient("my-sdk-key")`—although this would cause a deprecation warning to be logged; specifying both a key and a `Config` was always an error.
+- Removed the individual HTTP-related parameters such as `connect_timeout` from the [`Config`](https://launchdarkly-python-sdk.readthedocs.io/en/latest/api-main.html#ldclient.config.Config) type. The correct way to set these now is with the [`HTTPConfig`](https://launchdarkly-python-sdk.readthedocs.io/en/latest/api-main.html#ldclient.config.HTTPConfig) sub-configuration object: `Config(sdk_key = "my-sdk-key", http = HTTPConfig(connect_timeout = 10))`.
+- Removed all other types, parameters, and methods that were deprecated as of the last 6.x release.
+
+## [6.13.3] - 2021-02-23
+### Fixed:
+- The SDK could fail to send debug events when event debugging was enabled on the LaunchDarkly dashboard, if the application server&#39;s time zone was not GMT.
+
+## [6.13.2] - 2020-09-21
+### Fixed:
+- The SDK was not recognizing proxy authorization parameters included in a proxy URL (example: `http://username:password@proxyhost:port`). It will now use these parameters if present, regardless of whether you set the proxy URL programmatically or in an environment variable. (Thanks, [gangeli](https://github.com/launchdarkly/python-server-sdk/pull/145)!)
+
 ## [6.13.1] - 2020-07-13
 ### Fixed:
 - A problem with the SDK&#39;s use of `urllib3.Retry` could prevent analytics event delivery from being retried after a network error or server error. ([#143](https://github.com/launchdarkly/python-server-sdk/issues/143))
@@ -23,7 +108,7 @@ All notable changes to the LaunchDarkly Python SDK will be documented in this fi
 
 ## [6.12.1] - 2020-02-12
 ### Fixed:
-- When diagnostic events are enabled (as they are by default), the SDK was logging spurious warning messages saying &#34;Unhandled exception in event processor. Diagnostic event was not sent. [&#39;DiagnosticEventSendTask&#39; object has no attribute &#39;_response_fn&#39;]&#34;. The events were still being sent; the misleading message has been removed.
+- When diagnostic events are enabled (as they are by default), the SDK was logging spurious warning messages saying "Unhandled exception in event processor. Diagnostic event was not sent. [&#39;DiagnosticEventSendTask&#39; object has no attribute &#39;_response_fn&#39;]". The events were still being sent; the misleading message has been removed.
 
 ## [6.12.0] - 2020-02-11
 Note: if you are using the LaunchDarkly Relay Proxy to forward events, update the Relay to version 5.10.0 or later before updating to this Python SDK version.
@@ -127,11 +212,11 @@ Note that starting with this release, generated API documentation is available o
 
 ## [6.8.0] - 2019-01-31
 ### Added:
-- It is now possible to use Consul as a persistent feature store, similar to the existing Redis and DynamoDB integrations. See `Consul` in `ldclient.integrations`, and the reference guide for ["Using a persistent feature store"](https://docs.launchdarkly.com/v2.0/docs/using-a-persistent-feature-store).
+- It is now possible to use Consul as a persistent feature store, similar to the existing Redis and DynamoDB integrations. See `Consul` in `ldclient.integrations`, and the reference guide for ["Storing data"](https://docs.launchdarkly.com/sdk/features/storing-data#python).
 
 ## [6.7.0] - 2019-01-15
 ### Added:
-- It is now possible to use DynamoDB as a persistent feature store, similar to the existing Redis integration. See `DynamoDB` in `ldclient.integrations`, and the reference guide to ["Using a persistent feature store"](https://docs.launchdarkly.com/v2.0/docs/using-a-persistent-feature-store).
+- It is now possible to use DynamoDB as a persistent feature store, similar to the existing Redis integration. See `DynamoDB` in `ldclient.integrations`, and the reference guide to ["Storing data"](https://docs.launchdarkly.com/sdk/features/storing-data#python).
 - The new class `CacheConfig` (in `ldclient.feature_store`) encapsulates all the parameters that control local caching in database feature stores. This takes the place of the `expiration` and `capacity` parameters that are in the deprecated `RedisFeatureStore` constructor; it can be used with DynamoDB and any other database integrations in the future, and if more caching options are added to `CacheConfig` they will be automatically supported in all of the feature stores.
 
 ### Deprecated:
@@ -220,7 +305,7 @@ _This release was broken and has been removed._
 ## [6.0.0] - 2018-05-10
 
 ### Changed:
-- To reduce the network bandwidth used for analytics events, feature request events are now sent as counters rather than individual events, and user details are now sent only at intervals rather than in each event. These behaviors can be modified through the LaunchDarkly UI and with the new configuration option `inline_users_in_events`. For more details, see [Analytics Data Stream Reference](https://docs.launchdarkly.com/v2.0/docs/analytics-data-stream-reference).
+- To reduce the network bandwidth used for analytics events, feature request events are now sent as counters rather than individual events, and user details are now sent only at intervals rather than in each event. These behaviors can be modified through the LaunchDarkly UI and with the new configuration option `inline_users_in_events`.
 - The analytics event processor now flushes events at a configurable interval defaulting to 5 seconds, like the other SDKs (previously it flushed if no events had been posted for 5 seconds, or if events exceeded a configurable number). This interval is set by the new `Config` property `flush_interval`.
 
 ### Removed:

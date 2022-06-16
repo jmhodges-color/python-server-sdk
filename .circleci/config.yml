@@ -7,36 +7,27 @@ workflows:
   test:
     jobs:
       - test-linux:
-          name: Python 2.7
-          docker-image: circleci/python:2.7-jessie
-          test-with-codeclimate: true  # we only need to run CodeClimate in one job
-      - test-linux:
-          name: Python 3.3
-          docker-image: circleci/python:3.3-jessie
-          consul-supported: false  # Consul isn't supported in 3.3
-          filesource-supported: false  # FileDataSource isn't supported in 3.3
-          test-packaging: false  # packaging test requires virtualenv, which isn't supported in 3.3
-      - test-linux:
-          name: Python 3.4
-          docker-image: circleci/python:3.4-jessie
-          consul-supported: false  # Consul isn't supported in 3.4
-      - test-linux:
           name: Python 3.5
-          docker-image: circleci/python:3.5-jessie
+          docker-image: cimg/python:3.5
+          skip-sse-contract-tests: true  # the test service app has dependencies that aren't available in 3.5, which is EOL anyway
+          skip-contract-tests: true  # the test service app has dependencies that aren't available in 3.5, which is EOL anyway
       - test-linux:
           name: Python 3.6
-          docker-image: circleci/python:3.6-jessie
+          docker-image: cimg/python:3.6
       - test-linux:
           name: Python 3.7
-          docker-image: circleci/python:3.7-stretch
+          docker-image: cimg/python:3.7
       - test-linux:
           name: Python 3.8
-          docker-image: circleci/python:3.8-buster
+          docker-image: cimg/python:3.8
+      - test-linux:
+          name: Python 3.9
+          docker-image: cimg/python:3.9
+      - test-linux:
+          name: Python 3.10
+          docker-image: cimg/python:3.10
       - test-windows:
-          name: Windows Py2.7
-          py3: false
-      - test-windows:
-          name: Windows Py3.3
+          name: Windows Python 3
           py3: true
 
 jobs:
@@ -44,16 +35,19 @@ jobs:
     parameters:
       docker-image:
         type: string
-      consul-supported:
-        type: boolean
-        default: true
-      filesource-supported:
-        type: boolean
-        default: true
       test-packaging:
         type: boolean
         default: true
       test-with-codeclimate:
+        type: boolean
+        default: false
+      test-with-mypy:
+        type: boolean
+        default: true
+      skip-sse-contract-tests:
+        type: boolean
+        default: false
+      skip-contract-tests:
         type: boolean
         default: false
     docker:
@@ -66,15 +60,10 @@ jobs:
       - run:
           name: install requirements
           command: |
-            sudo pip install --upgrade pip virtualenv;
-            sudo pip install -r test-requirements.txt;
-            if [[ "<<parameters.filesource-supported>>" == "true" ]]; then
-              sudo pip install -r test-filesource-optional-requirements.txt;
-            fi;
-            if [[ "<<parameters.consul-supported>>" == "true" ]]; then
-              sudo pip install -r consul-requirements.txt;
-            fi;
-            sudo python setup.py install;
+            pip install -r test-requirements.txt;
+            pip install -r test-filesource-optional-requirements.txt;
+            pip install -r consul-requirements.txt;
+            python setup.py install;
             pip freeze
       - when:
           condition: <<parameters.test-with-codeclimate>>
@@ -101,10 +90,45 @@ jobs:
                 command: |
                   sudo rm -rf dist *.egg-info
                   ./test-packaging/test-packaging.sh
+      - when:
+          condition: <<parameters.test-with-mypy>>
+          steps:
+            - run:
+                name: verify typehints
+                command: |
+                  export PATH="/home/circleci/.local/bin:$PATH"
+                  make lint
+
+      - unless:
+          condition: <<parameters.skip-sse-contract-tests>>
+          steps:
+          - run:
+              name: build SSE contract test service
+              command: cd sse-contract-tests && make build-test-service
+          - run:
+              name: start SSE contract test service
+              command: cd sse-contract-tests && make start-test-service
+              background: true
+          - run:
+              name: run SSE contract tests
+              command: cd sse-contract-tests && make run-contract-tests
+
+      - unless:
+          condition: <<parameters.skip-contract-tests>>
+          steps:
+          - run: make build-contract-tests
+          - run:
+              command: make start-contract-test-service
+              background: true
+          - run:
+              name: run contract tests
+              command: TEST_HARNESS_PARAMS="-junit test-reports/contract-tests-junit.xml" make run-contract-tests
+
       - store_test_results:
           path: test-reports
       - store_artifacts:
           path: test-reports
+
 
   test-windows:
     executor:
@@ -115,21 +139,9 @@ jobs:
         type: boolean
     steps:
       - checkout
-      - when:
-          condition: <<parameters.py3>>
-          steps:
-            - run:
-                name: install Python 3
-                command: choco install python --no-progress
-      - unless:
-          condition: <<parameters.py3>>
-          steps:
-            - run:
-                name: install Python 2.7
-                command: |
-                  $ProgressPreference = "SilentlyContinue"  # prevents console errors from CircleCI host
-                  iwr -outf python-2.7.16.amd64.msi https://www.python.org/ftp/python/2.7.16/python-2.7.16.amd64.msi
-                  Start-Process msiexec.exe -Wait -ArgumentList '/I python-2.7.16.amd64.msi /quiet'
+      - run:
+          name: install Python 3
+          command: choco install python --no-progress
       - run:
           name: set up DynamoDB
           command: |
@@ -165,7 +177,6 @@ jobs:
       - run:
           name: install requirements
           command: |
-            $env:Path += ";C:\Python27\;C:\Python27\Scripts\"  # has no effect if 2.7 isn't installed
             python --version
             pip install -r test-requirements.txt
             pip install -r consul-requirements.txt
@@ -174,7 +185,6 @@ jobs:
           name: run tests
           command: |
             mkdir test-reports
-            $env:Path += ";C:\Python27\;C:\Python27\Scripts\"  # has no effect if 2.7 isn't installed
             python -m pytest -s --junitxml=test-reports/junit.xml testing;
       - store_test_results:
           path: test-reports

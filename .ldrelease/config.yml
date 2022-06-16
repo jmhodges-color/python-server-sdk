@@ -1,3 +1,5 @@
+version: 2
+
 repo:
   public: python-server-sdk
   private: python-server-sdk-private
@@ -8,10 +10,17 @@ publications:
   - url: https://launchdarkly-python-sdk.readthedocs.io/en/latest/
     description: documentation (readthedocs.io)
 
-template:
-  name: python
-  env:
-    LD_SKIP_DATABASE_TESTS: 1
+branches:
+  - name: main
+    description: 7.x
+  - name: 6.x
+
+jobs:
+  - docker: {}
+    template:
+      name: python
+    env:
+      LD_SKIP_DATABASE_TESTS: 1
 
 sdk:
   displayName: "Python"

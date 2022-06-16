@@ -2,10 +2,16 @@ import pytest
 import json
 import time
 from ldclient.client import LDClient, Config
+from ldclient.config import BigSegmentsConfig
+from ldclient.evaluation import BigSegmentsStatus
 from ldclient.feature_store import InMemoryFeatureStore
 from ldclient.flag import EvaluationDetail
+from ldclient.impl.big_segments import _hash_for_user_key
+from ldclient.impl.evaluator import _make_big_segment_ref
 from ldclient.interfaces import FeatureStore
-from ldclient.versioned_data_kind import FEATURES
+from ldclient.versioned_data_kind import FEATURES, SEGMENTS
+from testing.impl.evaluator_util import make_boolean_flag_matching_segment
+from testing.mock_components import MockBigSegmentStore
 from testing.stub_util import MockEventProcessor, MockUpdateProcessor
 from testing.test_ldclient import make_off_flag_with_value
 
@@ -32,19 +38,19 @@ flag2 = {
 class ErroringFeatureStore(FeatureStore):
     def get(self, kind, key, callback=lambda x: x):
         raise NotImplementedError()
-    
+
     def all(self, kind, callback=lambda x: x):
         raise NotImplementedError()
-    
+
     def upsert(self, kind, item):
         pass
-    
+
     def delete(self, key, version):
         pass
-    
+
     def init(self, data):
         pass
-    
+
     @property
     def initialized(self):
         return True
@@ -162,31 +168,56 @@ def test_variation_detail_when_feature_store_throws_error(caplog):
     errlog = get_log_lines(caplog, 'ERROR')
     assert errlog == [ 'Unexpected error while retrieving feature flag "feature.key": NotImplementedError()' ]
 
+def test_flag_using_big_segment():
+    segment = {
+        'key': 'segkey',
+        'version': 1,
+        'generation': 1,
+        'unbounded': True
+    }
+    flag = make_boolean_flag_matching_segment(segment)
+    store = InMemoryFeatureStore()
+    store.init({ FEATURES: { flag['key']: flag }, SEGMENTS: { segment['key']: segment } })
+    segstore = MockBigSegmentStore()
+    segstore.setup_metadata_always_up_to_date()
+    segstore.setup_membership(_hash_for_user_key(user['key']), { _make_big_segment_ref(segment): True })
+    config=Config(
+        sdk_key='SDK_KEY',
+        feature_store=store,
+        big_segments=BigSegmentsConfig(store=segstore),
+        event_processor_class=MockEventProcessor,
+        update_processor_class=MockUpdateProcessor
+    )
+    with LDClient(config) as client:
+        detail = client.variation_detail(flag['key'], user, False)
+        assert detail.value == True
+        assert detail.reason['bigSegmentsStatus'] == BigSegmentsStatus.HEALTHY
+
 def test_all_flags_returns_values():
     store = InMemoryFeatureStore()
     store.init({ FEATURES: { 'key1': flag1, 'key2': flag2 } })
     client = make_client(store)
-    result = client.all_flags(user)
+    result = client.all_flags_state(user).to_values_map()
     assert result == { 'key1': 'value1', 'key2': 'value2' }
 
 def test_all_flags_returns_none_if_user_is_none():
     store = InMemoryFeatureStore()
     store.init({ FEATURES: { 'key1': flag1, 'key2': flag2 } })
     client = make_client(store)
-    result = client.all_flags(None)
-    assert result is None
+    result = client.all_flags_state(None)
+    assert not result.valid
 
 def test_all_flags_returns_none_if_user_has_no_key():
     store = InMemoryFeatureStore()
     store.init({ FEATURES: { 'key1': flag1, 'key2': flag2 } })
     client = make_client(store)
-    result = client.all_flags({ })
-    assert result is None
+    result = client.all_flags_state({ })
+    assert not result.valid
 
 def test_all_flags_returns_none_if_feature_store_throws_error(caplog):
     store = ErroringFeatureStore()
     client = make_client(store)
-    assert client.all_flags({ "key": "user" }) is None
+    assert not client.all_flags_state({ "key": "user" }).valid
     errlog = get_log_lines(caplog, 'ERROR')
     assert errlog == [ 'Unable to read flags for all_flag_state: NotImplementedError()' ]
 
@@ -195,7 +226,7 @@ def test_all_flags_state_returns_state():
     store.init({ FEATURES: { 'key1': flag1, 'key2': flag2 } })
     client = make_client(store)
     state = client.all_flags_state(user)
-    assert state.valid == True
+    assert state.valid
     result = state.to_json_dict()
     assert result == {
         'key1': 'value1',
@@ -220,7 +251,7 @@ def test_all_flags_state_returns_state_with_reasons():
     store.init({ FEATURES: { 'key1': flag1, 'key2': flag2 } })
     client = make_client(store)
     state = client.all_flags_state(user, with_reasons=True)
-    assert state.valid == True
+    assert state.valid
     result = state.to_json_dict()
     assert result == {
         'key1': 'value1',
@@ -248,28 +279,37 @@ def test_all_flags_state_can_be_filtered_for_client_side_flags():
         'on': False,
         'offVariation': 0,
         'variations': [ 'a' ],
-        'clientSide': False
+        'clientSide': False,
+        'version': 100,
+        'trackEvents': False
     }
     flag2 = {
         'key': 'server-side-2',
         'on': False,
         'offVariation': 0,
         'variations': [ 'b' ],
-        'clientSide': False
+        'clientSide': False,
+        'version': 200,
+        'trackEvents': False
     }
     flag3 = {
         'key': 'client-side-1',
         'on': False,
         'offVariation': 0,
         'variations': [ 'value1' ],
-        'clientSide': True
+        'trackEvents': False,
+        'clientSide': True,
+        'version': 300,
+        'trackEvents': False
     }
     flag4 = {
         'key': 'client-side-2',
         'on': False,
         'offVariation': 0,
         'variations': [ 'value2' ],
-        'clientSide': True
+        'clientSide': True,
+        'version': 400,
+        'trackEvents': False
     }
 
     store = InMemoryFeatureStore()
@@ -277,7 +317,7 @@ def test_all_flags_state_can_be_filtered_for_client_side_flags():
     client = make_client(store)
 
     state = client.all_flags_state(user, client_side_only=True)
-    assert state.valid == True
+    assert state.valid
     values = state.to_values_map()
     assert values == { 'client-side-1': 'value1', 'client-side-2': 'value2' }
 
@@ -305,6 +345,7 @@ def test_all_flags_state_can_omit_details_for_untracked_flags():
         'on': False,
         'offVariation': 1,
         'variations': [ 'x', 'value3' ],
+        'trackEvents': False,
         'debugEventsUntilDate': future_time
     }
     store = InMemoryFeatureStore()

@@ -4,15 +4,16 @@ from threading import Thread
 import time
 import uuid
 
-from ldclient.config import Config
+from ldclient.config import Config, HTTPConfig
 from ldclient.diagnostics import create_diagnostic_id, _DiagnosticAccumulator
 from ldclient.event_processor import DefaultEventProcessor
 from ldclient.util import log
 from testing.http_util import start_server, BasicResponse
+from testing.proxy_test_util import do_proxy_tests
 from testing.stub_util import MockResponse, MockHttp
 
 
-default_config = Config()
+default_config = Config("fake_sdk_key")
 user = {
     'key': 'userkey',
     'name': 'Red'
@@ -68,6 +69,8 @@ class DefaultTestProcessor(DefaultEventProcessor):
     def __init__(self, **kwargs):
         if not 'diagnostic_opt_out' in kwargs:
             kwargs['diagnostic_opt_out'] = True
+        if not 'sdk_key' in kwargs:
+            kwargs['sdk_key'] = 'SDK_KEY'
         config = Config(**kwargs)
         diagnostic_accumulator = _DiagnosticAccumulator(create_diagnostic_id(config))
         DefaultEventProcessor.__init__(self, config, mock_http, diagnostic_accumulator = diagnostic_accumulator)
@@ -125,21 +128,22 @@ def test_individual_feature_event_is_queued_with_index_event():
         output = flush_and_get_events(ep)
         assert len(output) == 3
         check_index_event(output[0], e, user)
-        check_feature_event(output[1], e, False, None)
+        check_feature_event(output[1], e, False, None, None)
         check_summary_event(output[2])
 
 def test_user_is_filtered_in_index_event():
     with DefaultTestProcessor(all_attributes_private = True) as ep:
         e = {
             'kind': 'feature', 'key': 'flagkey', 'version': 11, 'user': user,
-            'variation': 1, 'value': 'value', 'default': 'default', 'trackEvents': True
+            'variation': 1, 'value': 'value', 'default': 'default', 'trackEvents': True,
+            'prereqOf': 'prereqFlagKey'
         }
         ep.send_event(e)
 
         output = flush_and_get_events(ep)
         assert len(output) == 3
         check_index_event(output[0], e, filtered_user)
-        check_feature_event(output[1], e, False, None)
+        check_feature_event(output[1], e, False, None, 'prereqFlagKey')
         check_summary_event(output[2])
 
 def test_user_attrs_are_stringified_in_index_event():
@@ -153,7 +157,7 @@ def test_user_attrs_are_stringified_in_index_event():
         output = flush_and_get_events(ep)
         assert len(output) == 3
         check_index_event(output[0], e, stringified_numeric_user)
-        check_feature_event(output[1], e, False, None)
+        check_feature_event(output[1], e, False, None, None)
         check_summary_event(output[2])
 
 def test_feature_event_can_contain_inline_user():
@@ -166,7 +170,7 @@ def test_feature_event_can_contain_inline_user():
 
         output = flush_and_get_events(ep)
         assert len(output) == 2
-        check_feature_event(output[0], e, False, user)
+        check_feature_event(output[0], e, False, user, None)
         check_summary_event(output[1])
 
 def test_user_is_filtered_in_feature_event():
@@ -179,7 +183,7 @@ def test_user_is_filtered_in_feature_event():
 
         output = flush_and_get_events(ep)
         assert len(output) == 2
-        check_feature_event(output[0], e, False, filtered_user)
+        check_feature_event(output[0], e, False, filtered_user, None)
         check_summary_event(output[1])
 
 def test_user_attrs_are_stringified_in_feature_event():
@@ -192,7 +196,7 @@ def test_user_attrs_are_stringified_in_feature_event():
 
         output = flush_and_get_events(ep)
         assert len(output) == 2
-        check_feature_event(output[0], e, False, stringified_numeric_user)
+        check_feature_event(output[0], e, False, stringified_numeric_user, None)
         check_summary_event(output[1])
 
 def test_index_event_is_still_generated_if_inline_users_is_true_but_feature_event_is_not_tracked():
@@ -214,15 +218,15 @@ def test_two_events_for_same_user_only_produce_one_index_event():
             'kind': 'feature', 'key': 'flagkey', 'version': 11, 'user': user,
             'variation': 1, 'value': 'value', 'default': 'default', 'trackEvents': True
         }
-        e1 = e0.copy();
+        e1 = e0.copy()
         ep.send_event(e0)
         ep.send_event(e1)
 
         output = flush_and_get_events(ep)
         assert len(output) == 4
         check_index_event(output[0], e0, user)
-        check_feature_event(output[1], e0, False, None)
-        check_feature_event(output[2], e1, False, None)
+        check_feature_event(output[1], e0, False, None, None)
+        check_feature_event(output[2], e1, False, None, None)
         check_summary_event(output[3])
 
 def test_new_index_event_is_added_if_user_cache_has_been_cleared():
@@ -231,17 +235,17 @@ def test_new_index_event_is_added_if_user_cache_has_been_cleared():
             'kind': 'feature', 'key': 'flagkey', 'version': 11, 'user': user,
             'variation': 1, 'value': 'value', 'default': 'default', 'trackEvents': True
         }
-        e1 = e0.copy();
-        ep.send_event(e0);
+        e1 = e0.copy()
+        ep.send_event(e0)
         time.sleep(0.2)
         ep.send_event(e1)
 
         output = flush_and_get_events(ep)
         assert len(output) == 5
         check_index_event(output[0], e0, user)
-        check_feature_event(output[1], e0, False, None)
+        check_feature_event(output[1], e0, False, None, None)
         check_index_event(output[2], e1, user)
-        check_feature_event(output[3], e1, False, None)
+        check_feature_event(output[3], e1, False, None, None)
         check_summary_event(output[4])
 
 def test_event_kind_is_debug_if_flag_is_temporarily_in_debug_mode():
@@ -257,7 +261,7 @@ def test_event_kind_is_debug_if_flag_is_temporarily_in_debug_mode():
         output = flush_and_get_events(ep)
         assert len(output) == 3
         check_index_event(output[0], e, user)
-        check_feature_event(output[1], e, True, user)
+        check_feature_event(output[1], e, True, user, None)
         check_summary_event(output[2])
 
 def test_event_can_be_both_tracked_and_debugged():
@@ -273,9 +277,36 @@ def test_event_can_be_both_tracked_and_debugged():
         output = flush_and_get_events(ep)
         assert len(output) == 4
         check_index_event(output[0], e, user)
-        check_feature_event(output[1], e, False, None)
-        check_feature_event(output[2], e, True, user)
+        check_feature_event(output[1], e, False, None, None)
+        check_feature_event(output[2], e, True, user, None)
         check_summary_event(output[3])
+
+def test_debug_mode_does_not_expire_if_both_client_time_and_server_time_are_before_expiration_time():
+    with DefaultTestProcessor() as ep:
+        # Pick a server time that slightly different from client time
+        server_time = now() + 1000
+
+        # Send and flush an event we don't care about, just to set the last server time
+        mock_http.set_server_time(server_time)
+        ep.send_event({ 'kind': 'identify', 'user': { 'key': 'otherUser' }})
+        flush_and_get_events(ep)
+
+        # Now send an event with debug mode on, with a "debug until" time that is further in
+        # the future than both the client time and the server time
+        debug_until = server_time + 10000
+        e = {
+            'kind': 'feature', 'key': 'flagkey', 'version': 11, 'user': user,
+            'variation': 1, 'value': 'value', 'default': 'default',
+            'trackEvents': False, 'debugEventsUntilDate': debug_until
+        }
+        ep.send_event(e)
+
+        # Should get a summary event only, not a full feature event
+        output = flush_and_get_events(ep)
+        assert len(output) == 3
+        check_index_event(output[0], e, user)
+        check_feature_event(output[1], e, True, user, None)  # debug event
+        check_summary_event(output[2])
 
 def test_debug_mode_expires_based_on_client_time_if_client_time_is_later_than_server_time():
     with DefaultTestProcessor() as ep:
@@ -530,7 +561,7 @@ def test_will_still_send_after_500_error():
     verify_recoverable_http_error(500)
 
 def test_does_not_block_on_full_inbox():
-    config = Config(events_max_pending=1)  # this sets the size of both the inbox and the outbox to 1
+    config = Config("fake_sdk_key", events_max_pending=1)  # this sets the size of both the inbox and the outbox to 1
     ep_inbox_holder = [ None ]
     ep_inbox = None
 
@@ -558,52 +589,13 @@ def test_does_not_block_on_full_inbox():
         assert message1.param == event1
         assert had_no_more
 
-def test_can_use_http_proxy_via_environment_var(monkeypatch):
-    with start_server() as server:
-        monkeypatch.setenv('http_proxy', server.uri)
-        config = Config(sdk_key = 'sdk-key', events_uri = 'http://not-real', diagnostic_opt_out = True)
-        _verify_http_proxy_is_used(server, config)
-
-def test_can_use_https_proxy_via_environment_var(monkeypatch):
-    with start_server() as server:
-        monkeypatch.setenv('https_proxy', server.uri)
-        config = Config(sdk_key = 'sdk-key', events_uri = 'https://not-real', diagnostic_opt_out = True)
-        _verify_https_proxy_is_used(server, config)
-
-def test_can_use_http_proxy_via_config():
-    with start_server() as server:
-        config = Config(sdk_key = 'sdk-key', events_uri = 'http://not-real', http_proxy=server.uri, diagnostic_opt_out = True)
-        _verify_http_proxy_is_used(server, config)
-
-def test_can_use_https_proxy_via_config():
-    with start_server() as server:
-        config = Config(sdk_key = 'sdk-key', events_uri = 'https://not-real', http_proxy=server.uri, diagnostic_opt_out = True)
-        _verify_https_proxy_is_used(server, config)
-
-def _verify_http_proxy_is_used(server, config):
-    server.for_path(config.events_uri + '/bulk', BasicResponse(200))
-    with DefaultEventProcessor(config) as ep:
-        ep.send_event({ 'kind': 'identify', 'user': user })
-        ep.flush()
-        ep._wait_until_inactive()
-
-        # For an insecure proxy request, our stub server behaves enough like the real thing to satisfy the
-        # HTTP client, so we should be able to see the request go through. Note that the URI path will
-        # actually be an absolute URI for a proxy request.
-        req = server.require_request()
-        assert req.method == 'POST'
-
-def _verify_https_proxy_is_used(server, config):
-    server.for_path(config.events_uri + '/bulk', BasicResponse(200))
-    with DefaultEventProcessor(config) as ep:
-        ep.send_event({ 'kind': 'identify', 'user': user })
-        ep.flush()
-        ep._wait_until_inactive()
-
-        # Our simple stub server implementation can't really do HTTPS proxying, so the request will fail, but
-        # it can still record that it *got* the request, which proves that the request went to the proxy.
-        req = server.require_request()
-        assert req.method == 'CONNECT'
+def test_http_proxy(monkeypatch):
+    def _event_processor_proxy_test(server, config, secure):
+        with DefaultEventProcessor(config) as ep:
+            ep.send_event({ 'kind': 'identify', 'user': user })
+            ep.flush()
+            ep._wait_until_inactive()
+    do_proxy_tests(_event_processor_proxy_test, 'POST', monkeypatch)
 
 def verify_unrecoverable_http_error(status):
     with DefaultTestProcessor(sdk_key = 'SDK_KEY') as ep:
@@ -669,7 +661,7 @@ def check_index_event(data, source, user):
     assert data['creationDate'] == source['creationDate']
     assert data['user'] == user
 
-def check_feature_event(data, source, debug, inline_user):
+def check_feature_event(data, source, debug, inline_user, prereq_of):
     assert data['kind'] == ('debug' if debug else 'feature')
     assert data['creationDate'] == source['creationDate']
     assert data['key'] == source['key']
@@ -681,6 +673,10 @@ def check_feature_event(data, source, debug, inline_user):
         assert data['userKey'] == str(source['user']['key'])
     else:
         assert data['user'] == inline_user
+    if prereq_of is None:
+        assert "prereqOf" not in data
+    else:
+        assert data['prereqOf'] == prereq_of
 
 def check_custom_event(data, source, inline_user):
     assert data['kind'] == 'custom'

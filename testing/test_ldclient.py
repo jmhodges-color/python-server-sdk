@@ -11,11 +11,7 @@ import logging
 import pytest
 from testing.stub_util import CapturingFeatureStore, MockEventProcessor, MockUpdateProcessor
 from testing.sync_util import wait_until
-
-try:
-    import queue
-except:
-    import Queue as queue
+import queue
 
 
 unreachable_uri="http://fake"
@@ -28,6 +24,10 @@ user = {
     }
 }
 
+anonymous_user = {
+    u'key': u'abc',
+    u'anonymous': True
+}
 
 def make_client(store = InMemoryFeatureStore()):
     return LDClient(config=Config(sdk_key = 'SDK_KEY',
@@ -76,12 +76,6 @@ def count_events(c):
     n = len(c._event_processor._events)
     c._event_processor._events = []
     return n
-
-
-def test_ctor_both_sdk_keys_set():
-    with pytest.raises(Exception):
-        config = Config(sdk_key="sdk key a", offline=True)
-        LDClient(sdk_key="sdk key b", config=config)
 
 
 def test_client_has_null_event_processor_if_offline():
@@ -149,6 +143,12 @@ def test_identify_no_user_key():
         assert count_events(client) == 0
 
 
+def test_identify_blank_user_key():
+    with make_client() as client:
+        client.identify({ 'key': '' })
+        assert count_events(client) == 0
+
+
 def test_track():
     with make_client() as client:
         client.track('my_event', user)
@@ -182,15 +182,36 @@ def test_track_no_user_key():
         assert count_events(client) == 0
 
 
+def test_track_anonymous_user():
+    with make_client() as client:
+        client.track('my_event', anonymous_user)
+        e = get_first_event(client)
+        assert e['kind'] == 'custom' and e['key'] == 'my_event' and e['user'] == anonymous_user and e.get('data') is None and e.get('metricValue') is None and e.get('contextKind') == 'anonymousUser'
+
+
+def test_alias():
+    with make_client() as client:
+        client.alias(user, anonymous_user)
+        e = get_first_event(client)
+        assert e['kind'] == 'alias' and e['key'] == 'xyz' and e['contextKind'] == 'user' and e['previousKey'] == 'abc' and e['previousContextKind'] == 'anonymousUser'
+
+
+def test_alias_no_user():
+    with make_client() as client:
+        client.alias(None, None)
+        assert count_events(client) == 0
+
+
 def test_defaults():
-    config=Config(base_uri="http://localhost:3000", defaults={"foo": "bar"}, offline=True)
+    config=Config("SDK_KEY", base_uri="http://localhost:3000", defaults={"foo": "bar"}, offline=True)
     with LDClient(config=config) as client:
         assert "bar" == client.variation('foo', user, default=None)
 
 
 def test_defaults_and_online():
     expected = "bar"
-    my_client = LDClient(config=Config(base_uri="http://localhost:3000",
+    my_client = LDClient(config=Config("SDK_KEY",
+                                       base_uri="http://localhost:3000",
                                        defaults={"foo": expected},
                                        event_processor_class=MockEventProcessor,
                                        update_processor_class=MockUpdateProcessor,
@@ -202,7 +223,8 @@ def test_defaults_and_online():
 
 
 def test_defaults_and_online_no_default():
-    my_client = LDClient(config=Config(base_uri="http://localhost:3000",
+    my_client = LDClient(config=Config("SDK_KEY",
+                                       base_uri="http://localhost:3000",
                                        defaults={"foo": "bar"},
                                        event_processor_class=MockEventProcessor,
                                        update_processor_class=MockUpdateProcessor))
@@ -234,7 +256,30 @@ def test_event_for_existing_feature():
             e.get('reason') is None and
             e['default'] == 'default' and
             e['trackEvents'] == True and
-            e['debugEventsUntilDate'] == 1000)
+            e['debugEventsUntilDate'] == 1000 and
+            e.get('contextKind') is None)
+
+
+def test_event_for_existing_feature_anonymous_user():
+    feature = make_off_flag_with_value('feature.key', 'value')
+    feature['trackEvents'] = True
+    feature['debugEventsUntilDate'] = 1000
+    store = InMemoryFeatureStore()
+    store.init({FEATURES: {'feature.key': feature}})
+    with make_client(store) as client:
+        assert 'value' == client.variation('feature.key', anonymous_user, default='default')
+        e = get_first_event(client)
+        assert (e['kind'] == 'feature' and
+            e['key'] == 'feature.key' and
+            e['user'] == anonymous_user and
+            e['version'] == feature['version'] and
+            e['value'] == 'value' and
+            e['variation'] == 0 and
+            e.get('reason') is None and
+            e['default'] == 'default' and
+            e['trackEvents'] == True and
+            e['debugEventsUntilDate'] == 1000 and
+            e['contextKind'] == 'anonymousUser')
 
 
 def test_event_for_existing_feature_with_reason():
