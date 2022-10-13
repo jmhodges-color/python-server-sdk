@@ -183,17 +183,17 @@ def test_is_one_of_with_multiple_variations():
     #]
     #
     # We've also tried `if_match('entity-ids', ['id1', 'id2'])
-    flag = td.flag('is-one-of-flag').variation_for_all_users(2).variations(1,2,3).if_match('entity-ids', 'id1', 'id2').then_return(3).on(True)
+    flag = td.flag('is-one-of-flag').variation_for_all_users(0).variations(4,5,6).if_match('entity-ids', 'id1', 'id2').then_return(1).on(True)
     td.update(flag)
 
     config = Config('SDK_KEY', update_processor_class = td, send_events = False)
     client = LDClient(config=config)
 
-    eval1 = client.variation_detail('is-one-of-flag', {'key': 'user1', 'custom': {'entity-ids': ['id1']}}, 1)
-    assert eval1.value == 3
+    eval1 = client.variation_detail('is-one-of-flag', {'key': 'user1', 'custom': {'entity-ids': ['id1']}}, 6)
+    assert eval1.value == 5
 
-    eval2 = client.variation_detail('is-one-of-flag', {'key': 'user2'}, 1)
-    assert eval2.value == 1
+    eval2 = client.variation_detail('is-one-of-flag', {'key': 'user2'}, 6)
+    assert eval2.value == 4
 
 ## FlagBuilder
 
