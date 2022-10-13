@@ -139,6 +139,33 @@ def test_can_handle_multiple_clients():
     client.close()
     client2.close()
 
+def test_is_one_of():
+    td = TestData.data_source()
+    # Trying to use `if_match` to reproduce a targeting clause like:
+    # "clauses": [
+    #  {
+    #    "contextKind": "user",
+    #    "attribute": "entity-ids",
+    #    "op": "in",
+    #    "values": [
+    #      "id1",
+    #      "id2"
+    #    ],
+    #    "negate": false
+    #  }
+    #]
+    #
+    # We've also tried `if_match('entity-ids', ['id1', 'id2'])
+    flag = td.flag('is-one-of-flag').if_match('entity-ids', 'id1', 'id2').then_return(True).variation_for_all_users(False).on(True)
+    td.update(flag)
+
+    config = Config('SDK_KEY', update_processor_class = td, send_events = False)
+    client = LDClient(config=config)
+
+    eval1 = client.variation_detail('is-one-of-flag', {'key': 'user1', 'custom': {'entity-ids': ['id1']}}, False)
+    assert eval1.reason['kind'] == "RULE_MATCH" # Is "FALLTHROUGH" now
+    assert eval1.value == True # Is False now
+
 
 ## FlagBuilder
 
