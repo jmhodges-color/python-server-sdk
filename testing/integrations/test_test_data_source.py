@@ -156,15 +156,15 @@ def test_is_one_of():
     #]
     #
     # We've also tried `if_match('entity-ids', ['id1', 'id2'])
-    flag = td.flag('is-one-of-flag').if_match('entity-ids', 'id1', 'id2').then_return(True).variation_for_all_users(False).on(True)
+    flag = td.flag('is-one-of-flag').variation_for_all_users(False).if_match('entity-ids', 'id1', 'id2').then_return(True).on(True)
     td.update(flag)
 
     config = Config('SDK_KEY', update_processor_class = td, send_events = False)
     client = LDClient(config=config)
 
     eval1 = client.variation_detail('is-one-of-flag', {'key': 'user1', 'custom': {'entity-ids': ['id1']}}, False)
-    assert eval1.reason['kind'] == "RULE_MATCH" # Is "FALLTHROUGH" now
     assert eval1.value == True # Is False now
+    assert eval1.reason['kind'] == "RULE_MATCH" # Is "FALLTHROUGH" now
 
 def test_is_one_of_with_multiple_variations():
     td = TestData.data_source()
@@ -183,7 +183,7 @@ def test_is_one_of_with_multiple_variations():
     #]
     #
     # We've also tried `if_match('entity-ids', ['id1', 'id2'])
-    flag = td.flag('is-one-of-flag').variations(1,2,3).if_match('entity-ids', 'id1', 'id2').then_return(3).variation_for_all_users(2).on(True)
+    flag = td.flag('is-one-of-flag').variation_for_all_users(2).variations(1,2,3).if_match('entity-ids', 'id1', 'id2').then_return(3).on(True)
     td.update(flag)
 
     config = Config('SDK_KEY', update_processor_class = td, send_events = False)
